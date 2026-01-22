@@ -1,69 +1,131 @@
 import streamlit as st
 import pandas as pd
-import joblib
-import nltk
-from nltk.sentiment import SentimentIntensityAnalyzer
-from sklearn.feature_extraction.text import TfidfVectorizer
+import plotly.express as px
+from transformers import pipeline
 
-# Download VADER lexicon if not already
-nltk.download('vader_lexicon')
+# --------------------------------------------------
+# Page configuration
+# --------------------------------------------------
+st.set_page_config(
+    page_title="Sentiment Analysis Dashboard",
+    page_icon="📊",
+    layout="centered"
+)
 
-# Load trained model and vectorizer
-model = joblib.load("sentiment_model.pkl")
-vectorizer = joblib.load("vectorizer.pkl")
+# --------------------------------------------------
+# Load pretrained transformer model (cached)
+# --------------------------------------------------
+@st.cache_resource(show_spinner=False)
+def load_model():
+    return pipeline(
+        "sentiment-analysis",
+        model="cardiffnlp/twitter-roberta-base-sentiment",
+        tokenizer="cardiffnlp/twitter-roberta-base-sentiment"
+    )
 
-# Initialize VADER
-sia = SentimentIntensityAnalyzer()
+classifier = load_model()
 
-# Hybrid prediction function
-def hybrid_predict(text):
-    vec = vectorizer.transform([text])
-    pred = model.predict(vec)[0]
+# Label mapping
+label_map = {
+    "LABEL_0": "negative",
+    "LABEL_1": "neutral",
+    "LABEL_2": "positive"
+}
 
-    # Check for unknown words
-    unknown_words = [w for w in text.lower().split() if w not in vectorizer.vocabulary_]
-    if unknown_words:
-        score = sia.polarity_scores(text)["compound"]
-        if score > 0.1:
-            pred = "positive"
-        elif score < -0.1:
-            pred = "negative"
-        else:
-            pred = "neutral"
-    return pred
+# --------------------------------------------------
+# Utility functions
+# --------------------------------------------------
+def is_valid_input(text):
+    """Check if the text input is valid (3-500 chars)."""
+    if text is None:
+        return False
+    text = text.strip()
+    return 3 <= len(text) <= 500
 
-# Streamlit UI
-st.title("Social Media Sentiment Analysis Dashboard")
-st.subheader("Analyze emotions from comments or tweets instantly")
+def predict_sentiment(text):
+    """Predict sentiment and return label + confidence."""
+    result = classifier(text)[0]
+    sentiment = label_map[result["label"]]
+    confidence = result["score"]
+    return sentiment, confidence
 
-option = st.radio("Choose Input Type:", ["Single Text", "Upload CSV"])
+# --------------------------------------------------
+# UI
+# --------------------------------------------------
+st.title("📊 Social Media Sentiment Analysis Dashboard")
+st.subheader("Powered by Pretrained Transformer Model (RoBERTa)")
 
+option = st.radio(
+    "Choose Input Type:",
+    ["Single Text", "Upload CSV"],
+    horizontal=True
+)
+
+# ---------------- Single Text Analysis ----------------
 if option == "Single Text":
-    text = st.text_area("Enter text here:")
-    if st.button("Analyze Sentiment"):
-        if text.strip():
-            prediction = hybrid_predict(text)
-            st.success(f"Predicted Sentiment: {prediction}")
-        else:
-            st.warning("Please enter some text.")
+    text = st.text_area(
+        "Enter text for sentiment analysis",
+        placeholder="Type a tweet, comment, or review..."
+    )
 
-else:
-    file = st.file_uploader("Upload CSV file with a 'Cleaned_Text' column", type=["csv"])
-    if file is not None:
-        data = pd.read_csv(file)
-        if "Cleaned_Text" not in data.columns:
-            st.error("CSV must contain 'Cleaned_Text' column")
+    if st.button("Analyze Sentiment"):
+        if not is_valid_input(text):
+            st.warning("Please enter valid text (3–500 characters).")
         else:
-            data["Predicted"] = data["Cleaned_Text"].apply(hybrid_predict)
-            st.write(data.head())
-            
-            # Plot sentiment distribution
-            import plotly.express as px
-            fig = px.pie(data, names="Predicted", title="Sentiment Distribution")
-            st.plotly_chart(fig)
-            
-            fig_bar = px.bar(data["Predicted"].value_counts().reset_index(),
-                             x="index", y="Predicted",
-                             labels={"index": "Sentiment", "Predicted": "Count"},
-                             title="Sentiment Counts")
-            st.plotly_chart(fig_bar)
+            with st.spinner("Analyzing sentiment..."):
+                sentiment, confidence = predict_sentiment(text)
+
+            if sentiment == "positive":
+                st.success(f"😊 **Positive Sentiment**")
+            elif sentiment == "negative":
+                st.error(f"😠 **Negative Sentiment**")
+            else:
+                st.info(f"😐 **Neutral Sentiment**")
+
+            st.write(f"**Confidence:** {confidence:.2f}")
+
+# ---------------- CSV Upload Analysis ----------------
+else:
+    file = st.file_uploader(
+        "Upload CSV file with a column named `text`",
+        type=["csv"]
+    )
+
+    if file is not None:
+        df = pd.read_csv(file)
+
+        if "text" not in df.columns:
+            st.error("❌ CSV must contain a column named `text`")
+        else:
+            with st.spinner("Analyzing sentiments for uploaded data..."):
+                df["Predicted_Sentiment"] = df["text"].astype(str).apply(
+                    lambda x: predict_sentiment(x)[0]
+                )
+
+            st.success("✅ Sentiment analysis completed")
+            st.dataframe(df.head())
+
+            # ---------------- Pie Chart ----------------
+            fig_pie = px.pie(
+                df,
+                names="Predicted_Sentiment",
+                title="Sentiment Distribution"
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+            # ---------------- Bar Chart ----------------
+            sentiment_counts = (
+                df["Predicted_Sentiment"]
+                .value_counts()
+                .reset_index()
+            )
+            sentiment_counts.columns = ["Sentiment", "Count"]
+
+            fig_bar = px.bar(
+                sentiment_counts,
+                x="Sentiment",
+                y="Count",
+                title="Sentiment Count",
+                text="Count"
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
