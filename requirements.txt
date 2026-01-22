@@ -3,10 +3,12 @@ numpy
 nltk
 scikit-learn
 tweepy
-streamlit
+streamlit=1.32.2
 plotly
 joblib
-transformers
+transformers==4.36.2
 torch
 streamlit==1.32.2
 altair==4.2.2
+huggingface-hub==0.20.3
+tokenizers==0.15.0
