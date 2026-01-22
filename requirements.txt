@@ -3,7 +3,7 @@ numpy
 nltk
 scikit-learn
 tweepy
-streamlit=1.32.2
+streamlit==1.32.2
 plotly
 joblib
 transformers==4.36.2
